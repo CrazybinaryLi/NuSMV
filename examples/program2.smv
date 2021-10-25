@@ -1,0 +1,16 @@
+MODULE main
+VAR
+a : 1..100; b : 1..100; pc : {l1, l2, l3, l4, l5};
+INIT pc = l1
+TRANS
+pc = l1 -> (((a != b & next(pc) = l2) | (a = b & next(pc) = l5))
+& next(a) = a & next(b) = b)
+TRANS
+pc = l2 -> (((a > b & next(pc) = l3) | (a < b & next(pc) = l4))
+& next(a) = a & next(b) = b)
+TRANS
+pc = l3 -> (next(pc) = l1 & next(a) = (a - b) & next(b) = b)
+TRANS
+pc = l4 -> (next(pc) = l1 & next(b) = (b - a) & next(a) = a)
+TRANS
+pc = l5 -> (next(pc) = l5 & next(a) = a & next(b) = b)

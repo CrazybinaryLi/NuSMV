@@ -1,0 +1,28 @@
+MODULE main
+VAR 
+a: 1..100; 
+b: 1..100;
+pc: {l1,l2,l3,l4,l5};
+INIT pc = l1
+ASSIGN
+next(pc):=
+case
+(pc = l1) & (a != b): l2;
+(pc = l1) & (a = b): l5;
+(pc = l2) & (a > b): l3;
+(pc = l2) & (a < b): l4;
+pc=l3: l1;
+pc=l4: l1;
+pc=l5: l5;
+TRUE : l1;
+esac;
+next(a):=
+case
+(pc=l3) & (a > b): (a - b);
+TRUE: a;
+esac;
+next(b):=
+case
+(pc=l4) & (b>a): (b - a);
+TRUE: b;
+esac;

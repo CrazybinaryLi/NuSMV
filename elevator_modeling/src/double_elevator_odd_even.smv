@@ -1,0 +1,191 @@
+--================================================================
+--一辆电梯只能停奇数楼层，另一辆只能停偶数楼层
+--================================================================
+
+--Button:每层一个按钮，按钮被按下去以后，控制器可以重置它。
+MODULE Button(reset)
+    VAR
+        pressed : boolean;
+    ASSIGN
+        init(pressed) := FALSE;
+        next(pressed) :=
+            case
+                pressed & reset : FALSE;
+                pressed & !reset : TRUE;
+                !pressed        : {FALSE,TRUE};
+            esac;
+
+--CABIN:一辆电梯只能停奇数楼层，另一辆只能停偶数楼层
+MODULE Cabin_odd(move_cmd)
+    VAR
+        level : {1,3};
+        direction : {standing,moving_up,moving_down};
+    ASSIGN
+        init(direction) := standing;
+        next(direction) :=
+            case
+                move_cmd=stop:standing;
+                move_cmd=move_up:moving_up;
+                move_cmd=move_down:moving_down;
+                move_cmd=nop:direction;
+            esac;
+        
+        next(level):=
+            case
+                next(direction)=standing:level;
+                next(direction)=moving_up:
+                    case
+                        level=3:3;
+                        TRUE:(level + 2);
+                    esac;
+                next(direction)=moving_down:
+                    case
+                        level=1:1;
+                        TRUE:(level - 2);
+                    esac;
+            esac;
+
+MODULE Cabin_even(move_cmd)
+    VAR
+        level : {2,4};
+        direction : {standing,moving_up,moving_down};
+    ASSIGN
+        init(direction) := standing;
+        next(direction) :=
+            case
+                move_cmd=stop:standing;
+                move_cmd=move_up:moving_up;
+                move_cmd=move_down:moving_down;
+                move_cmd=nop:direction;
+            esac;
+        
+        next(level):=
+            case
+                next(direction)=standing:level;
+                next(direction)=moving_up:
+                    case
+                        level=4:4;
+                        TRUE:(level + 2);
+                    esac;
+                next(direction)=moving_down:
+                    case
+                        level=2:2;
+                        TRUE:(level - 2);
+                    esac;
+            esac;
+         
+--每一层楼有一个门，门的状态可以是开、关。
+MODULE Door(door_cmd)
+    VAR
+        status : {open,closed};
+    ASSIGN
+        next(status) :=
+            case
+                door_cmd=open : open;
+                door_cmd=close : closed;
+                door_cmd=nop : status;
+            esac;
+
+--控制器接收的参数包括：楼层号，电梯厢移动的方向,门的状态，四个楼层按钮的状态。
+MODULE CTRL(level,direction,door,pressed_1,pressed_2,pressed_3,pressed_4)
+    VAR
+        move_cmd:{move_up,move_down,stop,nop};
+        door_cmd:{open,close,nop};
+        reset_1:boolean;
+        reset_2:boolean;
+        reset_3:boolean;
+        reset_4:boolean;
+    
+    --当电梯处于第N层，并且电梯门打开，被按下的按钮可以弹回
+    ASSIGN
+        reset_1 := (pressed_1 & level=1 & door=open);
+        reset_2 := (pressed_2 & level=2 & door=open);
+        reset_3 := (pressed_3 & level=3 & door=open);
+        reset_4 := (pressed_4 & level=4 & door=open);
+
+    --检查是否在当前楼层、高楼层、低楼层有人按了电梯按钮,说明出现了等待请求
+    DEFINE
+        pending_here := (level=1 & pressed_1) | (level=2 & pressed_2) | (level=3 & pressed_3) 
+                    | (level=4 & pressed_4);
+        pending_up := (level=1 &(pressed_2 | pressed_3 | pressed_4)) 
+                    | (level=2 &(pressed_3 | pressed_4))
+                    | (level=3 &(pressed_4));
+        pending_down := (level=4 &(pressed_3 | pressed_2 | pressed_1)) 
+                    | (level=3 &(pressed_2 | pressed_1))
+                    | (level=2 &(pressed_1));
+    
+    --如果电梯正在移动，不要给门发送命令
+    --如果当前楼层出现了等待请求，门是关闭的，打开门
+    --如果在不同的楼层出现了等待请求，门是打开的，关闭它
+    --其它原因不给门发送命令
+    ASSIGN
+        door_cmd :=
+            case
+                direction != standing : nop;
+                pending_here & door=closed : open;
+                pending_up & door=open : close;
+                pending_down & door=open : close;
+                TRUE : nop;
+            esac;
+    
+    --last_dir记录电梯厢最后移动的方向
+    VAR
+        last_dir:{moving_up,moving_down};
+    ASSIGN
+        next(last_dir):=
+            case
+                direction=standing:last_dir;
+                TRUE : direction;
+            esac;
+    
+    --如果门打开了，不要给电梯发送命令
+    --如果当前楼层有一个等待请求，电梯正在移动，停止电梯
+    --如果在高以及低楼层同时有等待请求，保持last_dir的移动
+    --如果高楼层有等待请求，往上移动，低楼层类似
+    --其它情况，不要发送命令给电梯厢
+    ASSIGN
+        move_cmd:=
+            case
+                door=open:nop;
+                pending_here:case
+                                direction!=standing:stop;
+                                TRUE:nop;
+                            esac;
+                pending_up&pending_down:case
+                                            direction!=standing:nop;
+                                            last_dir=moving_up:move_up;
+                                            last_dir=moving_down:move_down;
+                                        esac;
+                pending_up:case
+                                direction!=standing:nop;
+                                TRUE:move_up;
+                            esac;
+                pending_down:case
+                                direction!=standing:nop;
+                                TRUE:move_down;
+                            esac;
+                TRUE:nop;
+            esac;
+
+MODULE main
+    VAR cabin_odd:Cabin_odd(ctrl_odd.move_cmd);
+        door_odd:Door(ctrl_odd.door_cmd);
+        button_1:Button(ctrl_odd.reset_1);
+        button_3:Button(ctrl_odd.reset_3);
+        ctrl_odd:CTRL(cabin_odd.level,cabin_odd.direction,door_odd.status,
+                button_1.pressed,FALSE,
+                button_3.pressed,FALSE);
+
+        cabin_even:Cabin_even(ctrl_even.move_cmd);
+        door_even:Door(ctrl_even.door_cmd);
+        button_2:Button(ctrl_even.reset_2);
+        button_4:Button(ctrl_even.reset_4);
+        ctrl_even:CTRL(cabin_even.level,cabin_even.direction,door_even.status,
+                FALSE,button_2.pressed,
+                FALSE,button_4.pressed);
+        
+    -- Specification
+
+    --停奇数楼层的电梯只会停在奇数楼层，停偶数楼层的电梯只会停在偶数楼层
+    SPEC AG AF ! (cabin_odd.level = 2 | cabin_odd.level =4)
+    SPEC AG AF ! (cabin_even.level = 1 | cabin_even.level =3)            

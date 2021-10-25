@@ -1,0 +1,22 @@
+MODULE cell(input, running)
+VAR val : {red, green, blue};
+ASSIGN next(val) := 
+  case running = TRUE : input;
+          TRUE : val;
+  esac;
+MODULE main
+VAR
+running: 1..3;
+running1: boolean;
+running2: boolean;
+running3: boolean;
+c1 : cell(c3.val,running1);
+c2 : cell(c1.val,running2);
+c3 : cell(c2.val,running3);
+ASSIGN
+  initial(running1) := FALSE;
+  initial(running2) := FALSE;
+  initial(running2) := FALSE;  
+  next(running1) := running=1 ? TRUE : FALSE; 
+  next(running2) := running=2 ? TRUE : FALSE; 
+  next(running3) := running=3 ? TRUE : FALSE; 

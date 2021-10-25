@@ -1,0 +1,206 @@
+--=====================================================
+--普通单辆电梯建模
+--=====================================================
+
+--Button:每层一个按钮，按钮被按下去以后，控制器可以重置它。
+MODULE Button(reset)
+    VAR
+        pressed : boolean;
+    ASSIGN
+        init(pressed) := FALSE;
+        next(pressed) :=
+            case
+                pressed & reset : FALSE;
+                pressed & !reset : TRUE;
+                !pressed        : {FALSE,TRUE};
+            esac;
+    --只有在按钮被按下之后，控制器才可以重置按钮状态。
+    INVARSPEC (reset -> pressed)
+
+--CABIN:电梯厢可以停留在1~4层，电梯厢可以向上，向下，或者准备状态。
+MODULE Cabin(move_cmd)
+    VAR
+        level : {1,2,3,4};
+        direction : {standing,moving_up,moving_down};
+    ASSIGN
+        init(direction) := standing;
+        next(direction) :=
+            case
+                move_cmd=stop:standing;
+                move_cmd=move_up:moving_up;
+                move_cmd=move_down:moving_down;
+                move_cmd=nop:direction;
+            esac;
+        
+        next(level):=
+            case
+                next(direction)=standing:level;
+                next(direction)=moving_up:
+                    case
+                        level=4:4;
+                        TRUE:(level + 1);
+                    esac;
+                next(direction)=moving_down:
+                    case
+                        level=1:1;
+                        TRUE:(level - 1);
+                    esac;
+            esac;         
+    --只有在电梯厢运行的时候，控制器才可以发送stop命令
+    INVARSPEC(move_cmd = stop -> direction in {moving_up,moving_down})
+    --电梯厢悬停的时候，控制器才可以发送move命令
+    INVARSPEC(move_cmd in {move_up,move_down} -> direction = standing)
+    --最高楼层没有上，最低楼层没有下
+    SPEC AG(level=4 -> AX(direction != moving_up))
+    SPEC AG(level=1 -> AX(direction != moving_down))
+
+--每一层楼有一个门，门的状态可以是开、关。
+MODULE Door(door_cmd)
+    VAR
+        status : {open,closed};
+    ASSIGN
+        next(status) :=
+            case
+                door_cmd=open : open;
+                door_cmd=close : closed;
+                door_cmd=nop : status;
+            esac;
+    
+    --只有门的状态是关的时候，控制器才可以发open命令
+    INVARSPEC(door_cmd=open -> status = closed)
+    --只有门的状态是开的时候，控制器才可以发closed命令
+    INVARSPEC(door_cmd=closed -> status = open)
+
+--控制器接收的参数包括：楼层号，电梯厢移动的方向,门的状态，四个楼层按钮的状态。
+MODULE CTRL(level,direction,door,pressed_1,pressed_2,pressed_3,pressed_4)
+    VAR
+        move_cmd:{move_up,move_down,stop,nop};
+        door_cmd:{open,close,nop};
+        reset_1:boolean;
+        reset_2:boolean;
+        reset_3:boolean;
+        reset_4:boolean;
+    
+    --当电梯处于第N层，并且电梯门打开，被按下的按钮可以弹回
+    ASSIGN
+        reset_1 := (pressed_1 & level=1 & door=open);
+        reset_2 := (pressed_2 & level=2 & door=open);
+        reset_3 := (pressed_3 & level=3 & door=open);
+        reset_4 := (pressed_4 & level=4 & door=open);
+
+    --检查是否在当前楼层、高楼层、低楼层有人按了电梯按钮,说明出现了等待请求
+    DEFINE
+        pending_here := (level=1 & pressed_1) | (level=2 & pressed_2) | (level=3 & pressed_3) 
+                    | (level=4 & pressed_4);
+        pending_up := (level=1 &(pressed_2 | pressed_3 | pressed_4)) 
+                    | (level=2 &(pressed_3 | pressed_4))
+                    | (level=3 &(pressed_4));
+        pending_down := (level=4 &(pressed_3 | pressed_2 | pressed_1)) 
+                    | (level=3 &(pressed_2 | pressed_1))
+                    | (level=2 &(pressed_1));
+    
+    --如果电梯正在移动，不要给门发送命令
+    --如果当前楼层出现了等待请求，门是关闭的，打开门
+    --如果在不同的楼层出现了等待请求，门是打开的，关闭它
+    --其它原因不给门发送命令
+    ASSIGN
+        door_cmd :=
+            case
+                direction!=standing : nop;
+                pending_here&door=closed:open;
+                pending_up&door=open:close;
+                pending_down&door=open:close;
+                TRUE:nop;
+            esac;
+    
+    --last_dir记录电梯厢最后移动的方向
+    VAR
+        last_dir:{moving_up,moving_down};
+    ASSIGN
+        next(last_dir):=
+            case
+                direction=standing:last_dir;
+                TRUE : direction;
+            esac;
+    
+    --如果门打开了，不要给电梯发送命令
+    --如果当前楼层有一个等待请求，电梯正在移动，停止电梯
+    --如果在高以及低楼层同时有等待请求，保持last_dir的移动
+    --如果高楼层有等待请求，往上移动，低楼层类似
+    --其它情况，不要发送命令给电梯厢
+    ASSIGN
+        move_cmd:=
+            case
+                door=open:nop;
+                pending_here:case
+                                direction!=standing:stop;
+                                TRUE:nop;
+                            esac;
+                pending_up&pending_down:case
+                                            direction!=standing:nop;
+                                            last_dir=moving_up:move_up;
+                                            last_dir=moving_down:move_down;
+                                        esac;
+                pending_up:case
+                                direction!=standing:nop;
+                                TRUE:move_up;
+                            esac;
+                pending_down:case
+                                direction!=standing:nop;
+                                TRUE:move_down;
+                            esac;
+                TRUE:nop;
+            esac;
+
+MODULE main
+    VAR cabin:Cabin(ctrl.move_cmd);
+        door:Door(ctrl.door_cmd);
+        button_1:Button(ctrl.reset_1);
+        button_2:Button(ctrl.reset_2);
+        button_3:Button(ctrl.reset_3);
+        button_4:Button(ctrl.reset_4);
+        ctrl:CTRL(cabin.level,cabin.direction,door.status,
+                button_1.pressed,button_2.pressed,
+                button_3.pressed,button_4.pressed);
+        
+    --Specification
+    
+    --如果一台电梯向上并且当前楼层在电梯的上方，那么，只要当前楼层是向上激活的，电梯到此楼层一定会停
+    SPEC AG ((cabin.level =3 & button_4.pressed & cabin.direction = moving_up) -> AF (cabin.level = 4 & !button_4.pressed))
+    SPEC AG ((cabin.level =2 & button_3.pressed & cabin.direction = moving_up) -> AF (cabin.level = 3 & !button_3.pressed))
+    SPEC AG ((cabin.level =2 & button_4.pressed & cabin.direction = moving_up) -> AF (cabin.level = 4 & !button_4.pressed))
+
+    --任何一个按钮都不能永远被按下去
+    SPEC AG AF ! button_1.pressed
+    SPEC AG AF ! button_2.pressed
+    SPEC AG AF ! button_3.pressed
+    SPEC AG AF ! button_4.pressed
+
+    --电梯厢停在相应的楼层并且电梯门打开的时候，被按下的按钮才能被reset
+    SPEC AG (button_1.pressed ->
+            A [button_1.pressed U (cabin.level =1 & door.status=open)])
+    SPEC AG (button_2.pressed ->
+            A [button_2.pressed U (cabin.level =2 & door.status=open)])
+    SPEC AG (button_3.pressed ->
+            A [button_3.pressed U (cabin.level =3 & door.status=open)])
+    SPEC AG (button_4.pressed ->
+            A [button_4.pressed U (cabin.level =4 & door.status=open)])
+                    
+    --一旦电梯停在相应的楼层并且开了门，按钮就要被reset
+    SPEC AG ((button_1.pressed & cabin.level=1 & door.status=open)
+            -> AX !button_1.pressed)
+    SPEC AG ((button_2.pressed & cabin.level=2 & door.status=open)
+            -> AX !button_2.pressed)
+    SPEC AG ((button_3.pressed & cabin.level=3 & door.status=open)
+            -> AX !button_3.pressed)
+    SPEC AG ((button_4.pressed & cabin.level=4 & door.status=open)
+            -> AX !button_4.pressed)
+    
+    --只有门关闭的时候电梯才可以运行
+    INVARSPEC (door.status=open -> cabin.direction=standing)
+    
+    --如果按钮没有被按下，则控制器不能发送命令并且电梯厢一定处于standing状态
+    INVARSPEC (((!button_1.pressed) & (!button_2.pressed)
+                & (!button_3.pressed) & (!button_4.pressed))
+                -> (ctrl.door_cmd = nop & ctrl.move_cmd = nop)
+               )               

@@ -1,0 +1,19 @@
+MODULE counter_cell(tick)
+VAR
+value : 0..1;
+done : boolean;
+ASSIGN
+init(value) := 0;
+next(value) := case
+tick = FALSE : value;
+tick = TRUE : (value + 1) mod 2;
+esac;
+done := tick & (((value + 1) mod 2) = 0);
+
+MODULE main
+VAR
+bit0 : counter_cell(TRUE);
+bit1 : counter_cell(bit0.done);
+out : 0..3;
+ASSIGN
+out := bit0.value + 2*bit1.value;

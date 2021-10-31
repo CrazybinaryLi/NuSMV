@@ -52,6 +52,7 @@ MODULE Door(door_cmd)
     VAR
         status : {open,closed};
     ASSIGN
+        init(status) := closed;
         next(status) :=
             case
                 door_cmd = open : open;
@@ -94,34 +95,31 @@ MODULE CTRL(c1_level, c2_level, c1_direction, c2_direction,
     
     --相应楼层的按钮被按下，并且电梯到达了该楼层，且电梯门打开了，这个时候控制器给电梯按钮发送reset信号。
     ASSIGN
-        c1_reset1 := (c1_pressed1 & c1_level=1 & c1_door=open);
+        c1_reset1 := (c1_pressed1 & c1_level=1 & c1_door=open) | (c2_pressed1 & c2_level=1 & c2_door=open);
         
-        c1_reset2 := (c1_pressed2 & c1_level=2 & c1_door=open);
+        c1_reset2 := (c1_pressed2 & c1_level=2 & c1_door=open) | (c2_pressed2 & c2_level=2 & c2_door=open);
         
-        c1_reset3 := (c1_pressed3 & c1_level=3 & c1_door=open);
+        c1_reset3 := (c1_pressed3 & c1_level=3 & c1_door=open) | (c2_pressed3 & c2_level=3 & c2_door=open);
 
-        c1_reset4 := (c1_pressed4 & c1_level=4 & c1_door=open);
+        c1_reset4 := (c1_pressed4 & c1_level=4 & c1_door=open) | (c2_pressed4 & c2_level=4 & c2_door=open);
         
-        c2_reset1 := (c2_pressed1 & c2_level=1 & c2_door=open);
+        c2_reset1 := (c2_pressed1 & c2_level=1 & c2_door=open) | (c1_pressed1 & c1_level=1 & c1_door=open);
         
-        c2_reset2 := (c2_pressed2 & c2_level=2 & c2_door=open);
+        c2_reset2 := (c2_pressed2 & c2_level=2 & c2_door=open) | (c1_pressed2 & c1_level=2 & c1_door=open);
         
-        c2_reset3 := (c2_pressed3 & c2_level=3 & c2_door=open);
+        c2_reset3 := (c2_pressed3 & c2_level=3 & c2_door=open) | (c1_pressed3 & c1_level=3 & c1_door=open);
                 
-        c2_reset4 := (c2_pressed4 & c2_level=4 & c2_door=open);
+        c2_reset4 := (c2_pressed4 & c2_level=4 & c2_door=open) | (c1_pressed4 & c1_level=4 & c1_door=open);
                 
 
     --记录哪个楼层发出了等待请求
     ASSIGN
-        c1_pending_here := (c1_level=1 & c1_pressed1) | (c1_level=2 & c1_pressed2) | (c1_level=3 & c1_pressed3) | (c1_level=4 & c1_pressed4)
-                        | (c2_level=1 & c2_pressed1) | (c2_level=2 & c2_pressed2) | (c2_level=3 & c2_pressed3) | (c2_level=4 & c2_pressed4);
-        c2_pending_here := (c2_level=1 & c2_pressed1) | (c2_level=2 & c2_pressed2) | (c2_level=3 & c2_pressed3) | (c2_level=4 & c2_pressed4)
-                        | (c1_level=1 & c1_pressed1) | (c1_level=2 & c1_pressed2) | (c1_level=3 & c1_pressed3) | (c1_level=4 & c1_pressed4);
-                            
+        c1_pending_here := (c1_level=1 & (c1_pressed1 | c2_pressed1)) | (c1_level=2 & (c1_pressed2 | c2_pressed2)) | (c1_level=3 & (c1_pressed3 | c2_pressed3)) | (c1_level=4 & (c1_pressed4 | c2_pressed4));
+        c2_pending_here := (c2_level=1 & (c2_pressed1 | c1_pressed1)) | (c2_level=2 & (c2_pressed2 | c1_pressed2)) | (c2_level=3 & (c2_pressed3 | c1_pressed3)) | (c2_level=4 & (c2_pressed4 | c1_pressed4));
+      
         c1_pending_up := (c1_level=1 & (c1_pressed2 | c1_pressed3 | c1_pressed4)) | (c1_level=2 & (c1_pressed3 | c1_pressed4)) | (c1_level=3 & (c1_pressed4));
         c2_pending_up := (c2_level=1 & (c2_pressed2 | c2_pressed3 | c2_pressed4)) | (c2_level=2 & (c2_pressed3 | c2_pressed4)) | (c2_level=3 & (c2_pressed4));
                         
-        
         c1_pending_down := (c1_level=4 & (c1_pressed3 | c1_pressed2 | c1_pressed1)) | (c1_level=3 & (c1_pressed2 | c1_pressed1)) | (c1_level=2 & (c1_pressed1));
         c2_pending_down := (c2_level=4 & (c2_pressed3 | c2_pressed2 | c2_pressed1)) | (c2_level=3 & (c2_pressed2 | c2_pressed1)) | (c2_level=2 & (c2_pressed1));
                         
@@ -135,7 +133,7 @@ MODULE CTRL(c1_level, c2_level, c1_direction, c2_direction,
             case
                 c1_direction != standing : nop;
                 
-                c1_pending_here & c1_door = closed : open;
+                c1_pending_here & c1_door = closed : open; --响应当前楼层的请求
                 
                 c1_pending_up & c1_door = open : close;
 
@@ -179,13 +177,13 @@ MODULE CTRL(c1_level, c2_level, c1_direction, c2_direction,
             case
                 c1_door = open : nop; --电梯门开着的时候，不要发送指令
 
-                c1_pending_here: --当前楼层有等待请求
+                c1_pending_here: --当前楼层有人按下按钮
                             case
                                 ((c1_level = 1 & (c1_pressed1 | c2_pressed1)) | (c1_level = 2 & (c1_pressed2 | c2_pressed2)) | (c1_level = 3 & (c1_pressed3 | c2_pressed3)) | (c1_level = 4 & (c1_pressed4 | c2_pressed4))) & (c1_direction != standing) : stop;
                                 TRUE : nop;
                             esac;
 
-                c1_pending_up & c1_pending_down: --上下楼层发来等待请求
+                c1_pending_up & c1_pending_down: --上下楼层同时有人按下按钮
                             case
                                 c1_direction != standing : nop;
                                 c1_last_dir = moving_up : move_up;
@@ -194,34 +192,34 @@ MODULE CTRL(c1_level, c2_level, c1_direction, c2_direction,
 
                 c1_pending_up & c1_level = 1:
                         case 
-                            c1_direction != standing : nop; --如果电梯正在运行，则是nop指令
-                            c2_direction = standing & ((c1_pressed3 | c1_pressed4) & (c2_level >= 2)) : nop;--如果C2可以被调度
+                            c1_direction != standing : nop; --如果电梯正在运行，发送nop指令
+                            c2_direction = standing & ((c1_pressed3 | c1_pressed4) & (c2_level >= 2)) : nop;--如果C2距离目标楼层更近
                             TRUE : move_up; --调度电梯往上走
                         esac;
 
                 c1_pending_up & c1_level = 2:
                         case 
-                            c1_direction != standing : nop; --如果电梯正在运行，则是nop指令
-                            c2_direction = standing & (c1_pressed4 & c2_level >= 3) : nop; --如果C2可以被调度
+                            c1_direction != standing : nop; --如果电梯正在运行，发送nop指令
+                            c2_direction = standing & (c1_pressed4 & c2_level >= 3) : nop; --如果C2距离目标楼层更近
                             TRUE : move_up; --调度电梯往上走
                         esac;
 
                 c1_pending_up & c1_level = 3:
                         case 
-                            c1_direction != standing : nop; --如果电梯正在运行，则是nop指令
+                            c1_direction != standing : nop; --如果电梯正在运行，发送nop指令
                             TRUE:move_up; --调度电梯往上走
                         esac;                
 
                 c1_pending_down & c1_level = 4:
                         case
                             c1_direction != standing : nop;
-                            c2_direction = standing & ((c1_pressed1 | c1_pressed2) & c2_level <= 2): nop;
+                            c2_direction = standing & ((c1_pressed1 | c1_pressed2) & c2_level <= 3): nop;
                             TRUE:move_down;
                         esac;
                 c1_pending_down & c1_level = 3:
                         case
                             c1_direction != standing : nop;
-                            c2_direction = standing & (c1_pressed1 & c2_level =1): nop;
+                            c2_direction = standing & (c1_pressed1 & c2_level <= 2): nop;
                             TRUE:move_down;
                         esac;
                 c1_pending_down & c1_level = 2:
@@ -252,14 +250,14 @@ MODULE CTRL(c1_level, c2_level, c1_direction, c2_direction,
                 c2_pending_up & c2_level = 1:
                         case 
                             c2_direction != standing : nop; 
-                            c1_direction = standing & ((c2_pressed3 | c2_pressed4) & c1_level >= 2): nop ;--如果C1可以被调度
+                            c1_direction = standing & ((c2_pressed3 | c2_pressed4) & c1_level >= 2): nop ;--如果C1离目标楼层更近
                             TRUE:move_up; --调度电梯往上走
                         esac;
 
                 c2_pending_up & c2_level = 2:
                         case 
                             c2_direction != standing : nop; 
-                            c1_direction = standing & (c2_pressed4 & c1_level >= 3) : nop;--如果C1可以被调度
+                            c1_direction = standing & (c2_pressed4 & c1_level >= 3) : nop;--如果C1离目标楼层更近
                             TRUE:move_up; --调度电梯往上走
                         esac;
 
@@ -272,13 +270,13 @@ MODULE CTRL(c1_level, c2_level, c1_direction, c2_direction,
                 c2_pending_down & c2_level = 4:
                         case
                             c2_direction != standing : nop;
-                            c1_direction = standing & ((c2_pressed1 | c2_pressed2) & c1_level <= 2):nop;
+                            c1_direction = standing & ((c2_pressed1 | c2_pressed2) & c1_level <= 3):nop;
                             TRUE:move_down;
                         esac;
                 c2_pending_down & c2_level = 3:
                         case
                             c2_direction != standing : nop;
-                            c1_direction = standing & (c2_pressed1 & c1_level =1):nop;
+                            c1_direction = standing & (c2_pressed1 & c1_level <= 2):nop;
                             TRUE:move_down;
                         esac;
                 c2_pending_down & c2_level = 2:
@@ -312,7 +310,12 @@ MODULE main
 
     --Specification
     --任何一个按钮都不能永远被按下去
-    SPEC AG AF ! c1_button1.pressed
-    SPEC AG AF ! c1_button2.pressed
-    SPEC AG AF ! c1_button3.pressed
-    SPEC AG AF ! c1_button4.pressed
+    SPEC AG (AF !c1_button1.pressed)
+
+     --一旦电梯停在相应的楼层并且开了门，按钮就要被reset
+    SPEC AG ((c1_button1.pressed & cabin1.level=1 & c1_door.status=open)
+            -> AX !c1_button1.pressed)
+    
+    --如果一台电梯向上并且当前楼层在电梯的上方，那么，只要当前楼层是向上激活的，电梯到此楼层一定会停
+    SPEC AG ((cabin1.level =3 & c1_button4.pressed & cabin1.direction = moving_up) -> AF (cabin1.level = 4 & !c1_button4.pressed))
+    
